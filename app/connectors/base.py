@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import json
 import hashlib
@@ -52,7 +53,7 @@ class Connector(ABC):
         elapsed = now - self._rate_limit_last
         if elapsed < self.rate_limit_ms / 1000.0:
             sleep_time = self.rate_limit_ms / 1000.0 - elapsed
-            time.sleep(sleep_time)
+            await asyncio.sleep(sleep_time)
         self._rate_limit_last = time.time()
 
     def _canonicalise_url(self, url: str) -> str:

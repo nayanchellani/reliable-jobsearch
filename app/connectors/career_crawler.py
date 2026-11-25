@@ -228,9 +228,9 @@ class CareerCrawlerConnector(Connector):
 
         return jobs
 
-    def _rate_limit(self) -> None:
+    async def _rate_limit(self) -> None:
         now = time.time()
         elapsed = now - self._rate_limit_last
         if elapsed < self.rate_limit_ms / 1000.0:
-            time.sleep(self.rate_limit_ms / 1000.0 - elapsed)
+            await asyncio.sleep(self.rate_limit_ms / 1000.0 - elapsed)
         self._rate_limit_last = time.time()
