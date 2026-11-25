@@ -52,13 +52,13 @@ async def lifespan(app: FastAPI):
     try:
         settings = {s.setting_key: s.setting_value for s in db.query(UserSettings).all()}
 
-        # Greenhouse
-        if settings.get("greenhouse_token"):
-            register_connector("greenhouse", GreenhouseConnector(settings["greenhouse_token"]))
+        # Greenhouse (support multiple board tokens, default to public boards)
+        gh_tokens = settings.get("greenhouse_token") or os.environ.get("GREENHOUSE_TOKEN") or "stripe,airbnb,figma"
+        register_connector("greenhouse", GreenhouseConnector(gh_tokens))
 
-        # Lever
-        if settings.get("lever_company"):
-            register_connector("lever", LeverConnector(settings["lever_company"]))
+        # Lever (support multiple companies)
+        lever_companies = settings.get("lever_company") or os.environ.get("LEVER_COMPANY") or "spotify,coupa,aircall"
+        register_connector("lever", LeverConnector(lever_companies))
 
         # Ashby
         if settings.get("ashby_name"):
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
         # LinkedIn & Naukri Connectors
         # Layer 1: SearchEngineConnector (Enabled by default)
         register_connector("search_engine", SearchEngineConnector(
-            searxng_url=settings.get("searxng_url") or None,
+            searxng_url=settings.get("searxng_url") or os.environ.get("SEARXNG_URL") or "http://searxng:8080",
             enable_linkedin=settings.get("enable_linkedin_scraping", "true") == "true",
             enable_naukri=settings.get("enable_naukri_scraping", "true") == "true",
         ))

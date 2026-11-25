@@ -21,8 +21,9 @@ class GreenhouseConnector(Connector):
 
     name = "greenhouse"
 
-    def __init__(self, token: str, rate_limit_ms: int = 1000):
-        self.token = token
+    def __init__(self, tokens: str = "stripe,airbnb,figma", rate_limit_ms: int = 1000):
+        # Support comma-separated list of board tokens
+        self.tokens = [t.strip() for t in tokens.split(",") if t.strip()]
         self.rate_limit_ms = rate_limit_ms
         self.client = httpx.AsyncClient(timeout=30.0)
 
@@ -40,34 +41,36 @@ class GreenhouseConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[JobSearchFilters] = None,
     ) -> List[Job]:
-        """Fetch jobs from Greenhouse boards API."""
-        await self._rate_limit()
+        """Fetch jobs from Greenhouse boards API for all configured tokens."""
+        all_jobs: List[Job] = []
 
-        url = f"{GREENHOUSE_API_BASE}/boards/{self.token}/jobs"
-        params = {"content": "true"}
+        for token in self.tokens:
+            await self._rate_limit()
 
-        if location:
-            params["location"] = location
+            url = f"{GREENHOUSE_API_BASE}/boards/{token}/jobs"
+            params = {"content": "true"}
 
-        try:
-            resp = await self.client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+            if location:
+                params["location"] = location
 
-            jobs = []
-            for j in data.get("jobs", []):
-                job = self._parse_greenhouse_job(j)
-                if job:
-                    jobs.append(job)
+            try:
+                resp = await self.client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
 
-            self._success_count = getattr(self, "_success_count", 0) + 1
-            return jobs
+                for j in data.get("jobs", []):
+                    job = self._parse_greenhouse_job(j)
+                    if job:
+                        all_jobs.append(job)
 
-        except httpx.HTTPError as e:
-            self._error_count = getattr(self, "_error_count", 0) + 1
-            return []
-        finally:
-            self._rate_limit_last = time.time()
+                self._success_count = getattr(self, "_success_count", 0) + 1
+
+            except httpx.HTTPError as e:
+                self._error_count = getattr(self, "_error_count", 0) + 1
+            finally:
+                self._rate_limit_last = time.time()
+
+        return all_jobs
 
     def _parse_greenhouse_job(self, data: dict) -> Optional[Job]:
         """Parse a Greenhouse job dict into a Job model."""
