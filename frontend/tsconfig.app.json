@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["ES2022", "dom"],
+    "skipLibCheck": true,
+    "module": "commonjs",
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**.tsx", "vite.config.ts"]
+}

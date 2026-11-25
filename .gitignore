@@ -1,0 +1,41 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+.env
+.env.local
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+data/
+*.sqlite3
+*.db
+frontend/node_modules/
+frontend/dist/
+
+# Never commit stub shims (they live in tests/stubs/ only)
+pydantic/
+httpx/
+bs4/
+pytest_asyncio/

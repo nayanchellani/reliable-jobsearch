@@ -1,0 +1,32 @@
+job_aggregator:
+  title: Job Aggregator
+  version: 0.1.0
+  debug: false
+
+  # LLM configuration
+  llm:
+    base_url: ""
+    api_key: ""
+    model: "claude-3-5-sonnet-20240620"
+
+  # Connector settings
+  connectors:
+    enabled: []
+    rate_limit_ms: 1000
+
+  # Search defaults
+  search:
+    default_sort: "posted_at_desc"
+    default_page: 1
+    default_per_page: 20
+
+  # Cover letter settings
+  cover_letter:
+    max_words: 300
+    tones: ["professional", "enthusiastic", "concise"]
+
+  # Feature flags
+  features:
+    linkedin_scraping: false
+    naukri_scraping: false
+    guest_scraping: false
