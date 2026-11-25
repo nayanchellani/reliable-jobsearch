@@ -151,6 +151,6 @@ class AlertEmailConnector(Connector):
         filters: Optional[JobSearchFilters] = None,
     ) -> List[Job]:
         """Fetch alert email jobs (delegates to configured IMAP/Gmail)."""
-        self._respect_rate_limit()
+        await self._rate_limit()
         self._success_count += 1
         return []

@@ -1,6 +1,7 @@
 """SQLAlchemy base models for the job aggregator."""
 
 import os
+import json
 from datetime import datetime, date, timezone
 from pathlib import Path
 from sqlalchemy import (
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Index,
     func,
     create_engine,
+    JSON,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -78,16 +80,16 @@ class Job(Base):
     experience_level = Column(String(50), nullable=False, default="mid")
     salary = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
-    posted_at = Column(DateTime, nullable=True)
-    first_seen_at = Column(DateTime, nullable=True)
+    posted_at = Column(DateTime(timezone=True), nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=True)
     source = Column(String(100), nullable=False, index=True)
     apply_url = Column(String(500), nullable=False)
     canonical_url = Column(String(500), nullable=False, unique=True, index=True)
     status = Column(String(20), nullable=False, default="active")
-    raw = Column(Text, nullable=True)  # JSON dump of raw source data
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    raw = Column(JSON, nullable=True)  # JSON column for raw source data
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -105,4 +107,4 @@ class UserSettings(Base):
     id = Column(Integer, primary_key=True, index=True)
     setting_key = Column(String(100), unique=True, nullable=False, index=True)
     setting_value = Column(Text, nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

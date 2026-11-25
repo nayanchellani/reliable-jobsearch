@@ -9,7 +9,9 @@ Given any URL, attempts to:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 
 from bs4 import BeautifulSoup
@@ -28,6 +30,7 @@ class CareerCrawlerConnector(Connector):
     name = "career_crawler"
 
     def __init__(self, rate_limit_ms: int = 2000):
+        super().__init__()
         self.rate_limit_ms = rate_limit_ms
         self.client = httpx.AsyncClient(timeout=60.0)
 
@@ -122,7 +125,7 @@ class CareerCrawlerConnector(Connector):
             if data.get("datePosted"):
                 try:
                     from datetime import datetime, timezone
-                    posted_at = datetime.fromisoformat(data["datePosted"])
+                    posted_at = datetime.fromisoformat(data["datePosted"]).replace(tzinfo=timezone.utc)
                 except (ValueError, TypeError):
                     pass
 
@@ -136,7 +139,7 @@ class CareerCrawlerConnector(Connector):
                 salary=data.get("baseSalary", {}).get("value", {}).get("value", None) if data.get("baseSalary") else None,
                 description=data.get("description", ""),
                 posted_at=posted_at,
-                first_seen_at=datetime.utcnow(),
+                first_seen_at=datetime.now(timezone.utc),
                 source=self.name,
                 apply_url=apply_url,
                 canonical_url=canonical,
@@ -175,7 +178,7 @@ class CareerCrawlerConnector(Connector):
                         salary=None,
                         description="",
                         posted_at=None,
-                        first_seen_at=datetime.utcnow(),
+                        first_seen_at=datetime.now(timezone.utc),
                         source=self.name,
                         apply_url=apply_url,
                         canonical_url=apply_url,
@@ -195,10 +198,16 @@ class CareerCrawlerConnector(Connector):
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(user_agent="Mozilla/5.0")
             page = await context.new_page()
-            await page.goto(url, wait_until="networkidle")
+            try:
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+            except Exception:
+                return jobs
 
             # Extract any JSON-LD after JS rendering
             content = await page.content()
+            if not content:
+                return jobs
+
             soup = BeautifulSoup(content, "html.parser")
 
             for script in soup.find_all("script", type="application/ld+json"):
@@ -216,8 +225,6 @@ class CareerCrawlerConnector(Connector):
                                 jobs.append(job)
                 except Exception:
                     continue
-
-            await browser.close()
 
         return jobs
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
@@ -71,3 +72,54 @@ class LeverConnector(Connector):
                 self._rate_limit_last = time.time()
 
         return all_jobs
+
+    def _parse_lever_job(self, data: dict) -> Optional[Job]:
+        """Parse a Lever job dict into a Job model."""
+        try:
+            apply_url = data.get("applyUrl", "")
+            canonical = self._canonicalise_url(apply_url)
+
+            # Lever uses different field names
+            title = data.get("title", "")
+            company = data.get("company", "")
+            # Location may be formatted
+            location_raw = data.get("location", "")
+            # Parse city from formatted location
+            location = location_raw.split(",")[0] if location_raw else ""
+
+            # Experience level
+            experience_level = data.get("tags", [{}])[0].get("display", "mid") if data.get("tags") else "mid"
+
+            # Job type from lever
+            job_type = data.get("categories", {}).get("type", "full_time")
+
+            posted_at = None
+            if data.get("publishedAt"):
+                try:
+                    from datetime import datetime, timezone
+                    posted_at = datetime.fromisoformat(
+                        data["publishedAt"].replace("Z", "+00:00")
+                    ).replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError):
+                    pass
+
+            job = Job(
+                title=title,
+                company=company,
+                location=location,
+                remote=False,  # Lever doesn't always expose remote flag clearly
+                job_type=job_type,
+                experience_level=experience_level,
+                salary=data.get("salary"),  # May be None
+                description=data.get("description", ""),
+                posted_at=posted_at,
+                first_seen_at=datetime.now(timezone.utc),
+                source=self.name,
+                apply_url=apply_url,
+                canonical_url=canonical,
+                status="active",
+                raw=data,
+            )
+            return job
+        except Exception:
+            return None

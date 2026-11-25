@@ -109,7 +109,7 @@ class GuestPageConnector(Connector):
         if not self.enabled or self._disabled or not self._check_daily_cap():
             return []
 
-        self._respect_rate_limit()
+        await self._rate_limit()
         self._requests_today += 1
 
         url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"

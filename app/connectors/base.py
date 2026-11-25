@@ -19,6 +19,9 @@ class Connector(ABC):
     rate_limit_ms: int = 1000
     _rate_limit_last: float = 0.0
 
+    def __init__(self):
+        self._rate_limit_last = 0.0
+
     @abstractmethod
     async def fetch(
         self,

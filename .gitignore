@@ -33,9 +33,12 @@ data/
 *.db
 frontend/node_modules/
 frontend/dist/
+progress.md
 
 # Never commit stub shims (they live in tests/stubs/ only)
 pydantic/
 httpx/
 bs4/
 pytest_asyncio/
+progress.md
+progress.md

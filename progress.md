@@ -124,6 +124,25 @@ Coverage:
 | Background sync | ✅ Scheduler active |
 | Frontend UI | ✅ Design tokens applied |
 | Tests | ✅ 15 passing |
+| Jobs from LinkedIn | ✅ Working via SearchEngine |
+| Jobs from Naukri | ✅ Working via SearchEngine |
+| Jobs from Greenhouse | ✅ Working (stripe, airbnb, figma) |
+| Jobs from Lever | ✅ Working (spotify, coupa, aircall) |
+
+---
+
+## Recent Verification (2025-08-16)
+
+- ✅ Backend starts clean (no import errors)
+- ✅ `GET /health` returns 200 OK
+- ✅ `POST /auth/register` → returns JWT token
+- ✅ `POST /auth/login` → returns JWT token
+- ✅ `GET /jobs` with Bearer token → returns jobs from multiple sources (remotive, lever, greenhouse, search_engine)
+- ✅ `POST /connectors/sync` → triggers sync across all 11 connectors
+- ✅ `GET /connectors/health` → returns health for all registered connectors
+- ✅ `POST /connectors/sync` with query filters → triggers targeted sync
+- ✅ Frontend accessible at http://localhost:5173
+- ✅ Docker Compose: 3 services running (backend, frontend, searxng)
 
 ---
 
