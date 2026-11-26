@@ -64,20 +64,41 @@ async def run_connector(name: str, connector) -> dict:
 
 
 async def main():
+    import argparse
+    import os
+    from pathlib import Path
+    import yaml
+
+    parser = argparse.ArgumentParser(description="Diagnose job connectors")
+    parser.add_argument("--connector", type=str, default=None, help="Run only a specific connector")
+    args = parser.parse_args()
+
     print("Starting connector diagnosis...")
+
+    companies_cfg = {}
+    if Path("companies.yaml").exists():
+        companies_cfg = yaml.safe_load(Path("companies.yaml").read_text(encoding="utf-8")) or {}
+
+    gh_tokens = ",".join(companies_cfg.get("greenhouse", ["stripe", "airbnb", "figma"]))
+    lever_tokens = ",".join(companies_cfg.get("lever", ["spotify", "coupa"]))
+    ashby_tokens = ",".join(companies_cfg.get("ashby", ["linear", "vanta", "ramp"]))
+    searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 
     connectors = [
         ("remotive", RemotiveConnector()),
         ("arbeitnow", ArbeitnowConnector()),
         ("remoteok", RemoteOKConnector()),
-        ("greenhouse", GreenhouseConnector()),
-        ("lever", LeverConnector()),
-        ("ashby", AshbyConnector(board_name="test")),
-        ("search_engine", SearchEngineConnector()),
+        ("greenhouse", GreenhouseConnector(gh_tokens)),
+        ("lever", LeverConnector(lever_tokens)),
+        ("ashby", AshbyConnector(ashby_tokens)),
+        ("search_engine", SearchEngineConnector(searxng_url=searxng_url)),
         ("career_crawler", CareerCrawlerConnector()),
         ("alert_email", AlertEmailConnector()),
         ("guest_scraper", GuestPageConnector(enabled=False)),
     ]
+
+    if args.connector:
+        connectors = [(n, c) for n, c in connectors if n == args.connector]
 
     results = []
     for name, connector in connectors:

@@ -10,7 +10,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 import httpx
-from app.connectors.base import Connector
+from app.connectors.base import Connector, ConnectorError
 from app.schemas.job import Job
 
 ASHBY_API_BASE = "https://api.ashbyhq.com"
@@ -21,8 +21,8 @@ class AshbyConnector(Connector):
 
     name = "ashby"
 
-    def __init__(self, board_name: str, rate_limit_ms: int = 1000):
-        self.board_name = board_name  # Board/token name
+    def __init__(self, board_name: str = "linear,vanta,ramp", rate_limit_ms: int = 1000):
+        self.board_names = [b.strip() for b in board_name.split(",") if b.strip()]
         self.rate_limit_ms = rate_limit_ms
         self.client = httpx.AsyncClient(timeout=30.0)
 
@@ -40,30 +40,35 @@ class AshbyConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[JobSearchFilters] = None,
     ) -> List[Job]:
-        """Fetch jobs from Ashby API."""
-        await self._rate_limit()
+        """Fetch jobs from Ashby API across configured boards."""
+        all_jobs: List[Job] = []
+        self._last_error: Optional[str] = None
 
-        url = f"https://api.ashbyhq.com/posting-api/job-board/{self.board_name}"
+        for board in self.board_names:
+            await self._rate_limit()
+            url = f"https://api.ashbyhq.com/posting-api/job-board/{board}"
 
-        try:
-            resp = await self.client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+            try:
+                resp = await self.client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
 
-            jobs = []
-            for j in data.get("jobs", []) if isinstance(data, dict) else []:
-                job = self._parse_ashby_job(j)
-                if job:
-                    jobs.append(job)
+                for j in data.get("jobs", []) if isinstance(data, dict) else []:
+                    job = self._parse_ashby_job(j)
+                    if job:
+                        all_jobs.append(job)
 
-            self._success_count = getattr(self, "_success_count", 0) + 1
-            return jobs
+                self._success_count = getattr(self, "_success_count", 0) + 1
+            except httpx.HTTPError as e:
+                self._error_count = getattr(self, "_error_count", 0) + 1
+                self._last_error = f"Ashby ({board}): {e}"
+            finally:
+                self._rate_limit_last = time.time()
 
-        except httpx.HTTPError as e:
-            self._error_count = getattr(self, "_error_count", 0) + 1
-            return []
-        finally:
-            self._rate_limit_last = time.time()
+        if not all_jobs and self._last_error:
+            raise ConnectorError(self._last_error)
+
+        return all_jobs
 
     def _parse_ashby_job(self, data: dict) -> Optional[Job]:
         """Parse an Ashby job dict into a Job model."""
