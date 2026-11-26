@@ -26,7 +26,7 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 import httpx
 from bs4 import BeautifulSoup
 
-from app.connectors.base import Connector
+from app.connectors.base import Connector, ConnectorError
 from app.schemas.job import Job, JobSearchFilters, ConnectorHealth
 
 
@@ -121,19 +121,21 @@ class SearchEngineConnector(Connector):
         params = {"q": q, "format": "json"}
         try:
             resp = await self.client.get(url, params=params)
-            if resp.status_code == 200:
-                data = resp.json()
-                results = []
-                for item in data.get("results", []):
-                    results.append({
-                        "url": item.get("url", ""),
-                        "title": item.get("title", ""),
-                        "snippet": item.get("content", ""),
-                    })
-                return results
-        except Exception:
-            pass
-        return []
+            if resp.status_code != 200:
+                raise ConnectorError(f"SearXNG returned HTTP {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            results = []
+            for item in data.get("results", []):
+                results.append({
+                    "url": item.get("url", ""),
+                    "title": item.get("title", ""),
+                    "snippet": item.get("content", ""),
+                })
+            return results
+        except ConnectorError:
+            raise
+        except Exception as e:
+            raise ConnectorError(f"SearXNG connection error ({url}): {e}") from e
 
     async def _query_duckduckgo_fallback(self, q: str) -> List[Dict[str, str]]:
         """Fallback to DuckDuckGo HTML search if SearXNG is unavailable."""
@@ -160,8 +162,8 @@ class SearchEngineConnector(Connector):
                             "title": a_elem.get_text(strip=True),
                             "snippet": link.get_text(strip=True),
                         })
-        except Exception:
-            pass
+        except Exception as e:
+            raise ConnectorError(f"DuckDuckGo fallback error: {e}") from e
         return results
 
     def _parse_relative_date(self, text: str) -> Optional[datetime]:

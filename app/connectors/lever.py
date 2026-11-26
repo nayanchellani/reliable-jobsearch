@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
-from app.connectors.base import Connector
+from app.connectors.base import Connector, ConnectorError
 from app.schemas.job import Job
 
 LEVER_API_BASE = "https://api.lever.co/v0"
@@ -68,8 +68,12 @@ class LeverConnector(Connector):
 
             except httpx.HTTPError as e:
                 self._error_count = getattr(self, "_error_count", 0) + 1
+                self._last_error = f"Lever ({company}): {e}"
             finally:
                 self._rate_limit_last = time.time()
+
+        if not all_jobs and getattr(self, "_last_error", None):
+            raise ConnectorError(self._last_error)
 
         return all_jobs
 

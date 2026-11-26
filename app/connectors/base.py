@@ -13,6 +13,11 @@ from typing import List, Dict, Any, Optional
 from app.schemas.job import Job, JobSearchFilters, ConnectorHealth
 
 
+class ConnectorError(Exception):
+    """Raised when a connector encounters an HTTP, connection, or backend error."""
+    pass
+
+
 class Connector(ABC):
     """Abstract base class for all job board connectors."""
 

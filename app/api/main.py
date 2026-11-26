@@ -53,17 +53,31 @@ async def lifespan(app: FastAPI):
     try:
         settings = {s.setting_key: s.setting_value for s in db.query(UserSettings).all()}
 
-        # Greenhouse (support multiple board tokens, default to public boards)
-        gh_tokens = settings.get("greenhouse_token") or os.environ.get("GREENHOUSE_TOKEN") or "stripe,airbnb,figma"
+        # Load default ATS tokens from companies.yaml if available
+        companies_cfg: Dict[str, List[str]] = {}
+        companies_yaml = Path("companies.yaml")
+        if companies_yaml.exists():
+            try:
+                import yaml
+                companies_cfg = yaml.safe_load(companies_yaml.read_text(encoding="utf-8")) or {}
+            except Exception as e:
+                print(f"[WARN] Failed to load companies.yaml: {e}")
+
+        # Greenhouse (support multiple board tokens, default to companies.yaml)
+        gh_default = ",".join(companies_cfg.get("greenhouse", ["stripe", "airbnb", "figma"]))
+        gh_tokens = settings.get("greenhouse_token") or os.environ.get("GREENHOUSE_TOKEN") or gh_default
         register_connector("greenhouse", GreenhouseConnector(gh_tokens))
 
-        # Lever (support multiple companies)
-        lever_companies = settings.get("lever_company") or os.environ.get("LEVER_COMPANY") or "spotify,coupa,aircall"
+        # Lever (support multiple companies, default to companies.yaml)
+        lever_default = ",".join(companies_cfg.get("lever", ["spotify", "coupa"]))
+        lever_companies = settings.get("lever_company") or os.environ.get("LEVER_COMPANY") or lever_default
         register_connector("lever", LeverConnector(lever_companies))
 
-        # Ashby
-        if settings.get("ashby_name"):
-            register_connector("ashby", AshbyConnector(settings["ashby_name"]))
+        # Ashby (support multiple boards, default to companies.yaml)
+        ashby_default = ",".join(companies_cfg.get("ashby", ["linear", "vanta", "ramp"]))
+        ashby_name = settings.get("ashby_name") or os.environ.get("ASHBY_NAME") or ashby_default
+        if ashby_name:
+            register_connector("ashby", AshbyConnector(ashby_name))
 
         # Career Crawler (no auth needed)
         register_connector("career_crawler", CareerCrawlerConnector())

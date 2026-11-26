@@ -1,0 +1,14 @@
+# Verified default ATS board tokens (auto-loaded if no custom tokens are set)
+greenhouse:
+  - stripe
+  - airbnb
+  - figma
+
+lever:
+  - spotify
+  - coupa
+
+ashby:
+  - linear
+  - vanta
+  - ramp
