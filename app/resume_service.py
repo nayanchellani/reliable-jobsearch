@@ -46,35 +46,63 @@ class ResumeService:
     """Service handling resume extraction, match score computation, and cover letter generation."""
 
     def __init__(self, llm_base_url: Optional[str] = None, llm_api_key: Optional[str] = None, llm_model: Optional[str] = None):
-        self.base_url = llm_base_url or os.getenv("LLM_BASE_URL", "http://127.0.0.1:31415")
-        self.api_key = llm_api_key or os.getenv("LLM_API_KEY", "")
+        self.base_url = llm_base_url or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "http://127.0.0.1:31415"
+        self.api_key = llm_api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
         self.model = llm_model or os.getenv("LLM_MODEL", "auto")
+        if not self.api_key:
+            try:
+                from app.db.base import SessionLocal, UserSettings
+                db = SessionLocal()
+                try:
+                    s = {r.setting_key: r.setting_value for r in db.query(UserSettings).all()}
+                    self.base_url = llm_base_url or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or s.get("llm_base_url") or self.base_url
+                    self.api_key = llm_api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or s.get("llm_api_key") or ""
+                    if self.model == "auto":
+                        self.model = s.get("llm_model") or "auto"
+                finally:
+                    db.close()
+            except Exception:
+                pass
 
     def extract_text_from_file(self, file_bytes: bytes, filename: str) -> str:
         """Extract text from PDF, DOCX or plain text files."""
         fn = filename.lower()
         if fn.endswith(".pdf"):
+            for mod in ("pypdf", "PyPDF2"):
+                try:
+                    m = __import__(mod)
+                    Reader = getattr(m, "PdfReader", None) or getattr(m, "PdfFileReader", None)
+                    reader = Reader(io.BytesIO(file_bytes))
+                    pages = getattr(reader, "pages", None)
+                    if pages is None and hasattr(reader, "getNumPages"):
+                        pages = [reader.getPage(i) for i in range(reader.getNumPages())]
+                    text = " ".join((p.extract_text() or "") for p in (pages or []))
+                    if text.strip():
+                        return text
+                except Exception:
+                    continue
+            raw = file_bytes.decode("latin1", errors="ignore")
+            chunks = re.findall(r"[A-Za-z0-9@.+,()/: -]{4,}", raw)
+            return re.sub(r"\s+", " ", " ".join(chunks)).strip()
+
+        if fn.endswith(".docx"):
             try:
-                # Try pypdf / pdfminer if available
-                import pypdf
-                reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-                text = " ".join([page.extract_text() or "" for page in reader.pages])
+                import docx
+                doc = docx.Document(io.BytesIO(file_bytes))
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
                 if text.strip():
                     return text
             except Exception:
                 pass
-            # Fallback simple regex extraction of ASCII from stream
-            return re.sub(r"[^\x20-\x7E\n]", " ", file_bytes.decode("latin1", errors="ignore"))
-
-        elif fn.endswith(".docx"):
             try:
-                import docx
-                doc = docx.Document(io.BytesIO(file_bytes))
-                return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                import zipfile
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                    xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
+                    text = re.sub("<[^>]+>", " ", xml)
+                    return re.sub(r"\s+", " ", text).strip()
             except Exception:
-                pass
+                return ""
 
-        # Plain text
         return file_bytes.decode("utf-8", errors="replace")
 
     def parse_resume_to_json(self, raw_text: str) -> ResumeProfile:
@@ -239,12 +267,7 @@ class ResumeService:
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
                 }
-                resp = httpx.post(
-                    f"{self.base_url.rstrip('/')}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                    json=payload,
-                    timeout=15.0,
-                )
+                base=self.base_url.rstrip('/'); url=base+"/chat/completions" if base.endswith("/v1") else base+"/v1/chat/completions"; resp = httpx.post(url, headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}, json=payload, timeout=15.0)
                 if resp.status_code == 200:
                     text = resp.json()["choices"][0]["message"]["content"].strip()
                     # Enforce <= 300 words

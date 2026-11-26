@@ -18,6 +18,22 @@ class ConnectorError(Exception):
     pass
 
 
+def normalize_job_type(raw: str) -> str:
+    """Normalise free-form job type strings to the Job schema's Literal values."""
+    if not raw:
+        return "full_time"
+    s = raw.lower().replace("-", "_").replace(" ", "_")
+    if s in ("full_time", "fulltime", "permanent", "regular", "employee"):
+        return "full_time"
+    if s in ("part_time", "parttime"):
+        return "part_time"
+    if s in ("contract", "contractor", "freelance", "temporary", "temp"):
+        return "contract"
+    if s in ("internship", "intern", "apprenticeship", "co_op", "coop"):
+        return "internship"
+    return "full_time"  # safe default
+
+
 class Connector(ABC):
     """Abstract base class for all job board connectors."""
 
@@ -78,6 +94,10 @@ class Connector(ABC):
         new_query = urlencode(filtered_qs, doseq=True) if filtered_qs else ""
         new_url = urlunparse(parsed._replace(query=new_query))
         return new_url
+
+    # Backwards-compatible alias for connectors calling old name
+    async def _respect_rate_limit(self) -> None:
+        await self._rate_limit()
 
     def _make_job_from_raw(self, raw: dict, source: str) -> Job:
         """Normalise raw source data into a Job object."""

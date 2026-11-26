@@ -37,7 +37,7 @@ class ArbeitnowConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[Any] = None,
     ) -> List[Job]:
-        self._rate_limit()
+        await self._rate_limit()
 
         url = "https://www.arbeitnow.com/api/job-board-api"
         params = {}
@@ -61,8 +61,6 @@ class ArbeitnowConnector(Connector):
         except httpx.HTTPError as e:
             self._error_count = getattr(self, "_error_count", 0) + 1
             return []
-        finally:
-            self._rate_limit_last = time.time()
 
     def _parse_arbeitnow_job(self, data: dict) -> Optional[Job]:
         try:

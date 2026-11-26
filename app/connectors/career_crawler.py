@@ -16,10 +16,13 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from bs4 import BeautifulSoup
 import httpx
-from playwright.async_api import async_playwright
+try:
+    from playwright.async_api import async_playwright
+except Exception:
+    async_playwright = None
 
 from app.connectors.base import Connector
-from app.schemas.job import Job
+from app.schemas.job import Job, JobSearchFilters, ConnectorHealth
 
 CAREER_CRAWLER_RATE_LIMIT = 2000  # 2 seconds between requests
 
@@ -167,7 +170,11 @@ class CareerCrawlerConnector(Connector):
             # Filter for job-like URLs
             if any(pattern in href.lower() for pattern in ["/job", "/positions", "/careers", "apply"]):
                 if len(title_text) > 5:  # Reasonable job title length:
-                    apply_url = self._canonicalise_url(href)
+                    apply_url = href
+                    if apply_url.startswith("/"):
+                        from urllib.parse import urljoin
+                        apply_url = urljoin(url, href)
+                    apply_url = self._canonicalise_url(apply_url)
                     job = Job(
                         title=title_text or query[:50],
                         company="",
@@ -194,43 +201,36 @@ class CareerCrawlerConnector(Connector):
     ) -> List[Job]:
         """Use Playwright to render JS-heavy pages then extract."""
         jobs = []
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(user_agent="Mozilla/5.0")
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-            except Exception:
-                return jobs
-
-            # Extract any JSON-LD after JS rendering
-            content = await page.content()
-            if not content:
-                return jobs
-
-            soup = BeautifulSoup(content, "html.parser")
-
-            for script in soup.find_all("script", type="application/ld+json"):
+        if async_playwright is None:
+            return jobs
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(user_agent="Mozilla/5.0")
+                page = await context.new_page()
                 try:
-                    data = json.loads(script.string or script.get_text())
-                    if isinstance(data, list):
-                        items = data
-                    else:
-                        items = [data]
-
-                    for item in items:
-                        if item.get("@type") == "JobPosting":
-                            job = self._parse_json_ld_job(item)
-                            if job:
-                                jobs.append(job)
+                    await page.goto(url, wait_until="networkidle", timeout=30000)
                 except Exception:
-                    continue
-
+                    return jobs
+                content = await page.content()
+                if not content:
+                    return jobs
+                soup = BeautifulSoup(content, "html.parser")
+                for script in soup.find_all("script", type="application/ld+json"):
+                    try:
+                        data = json.loads(script.string or script.get_text())
+                        items = data if isinstance(data, list) else [data]
+                        for item in items:
+                            if item.get("@type") == "JobPosting":
+                                job = self._parse_json_ld_job(item)
+                                if job:
+                                    jobs.append(job)
+                    except Exception:
+                        continue
+                await context.close()
+                await browser.close()
+        except Exception:
+            return jobs
         return jobs
 
-    async def _rate_limit(self) -> None:
-        now = time.time()
-        elapsed = now - self._rate_limit_last
-        if elapsed < self.rate_limit_ms / 1000.0:
-            await asyncio.sleep(self.rate_limit_ms / 1000.0 - elapsed)
-        self._rate_limit_last = time.time()
+    # Uses Connector._rate_limit()

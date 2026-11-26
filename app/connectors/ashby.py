@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
-from app.connectors.base import Connector, ConnectorError
+from app.connectors.base import Connector, ConnectorError, normalize_job_type
 from app.schemas.job import Job
 
 ASHBY_API_BASE = "https://api.ashbyhq.com"
@@ -54,7 +55,7 @@ class AshbyConnector(Connector):
                 data = resp.json()
 
                 for j in data.get("jobs", []) if isinstance(data, dict) else []:
-                    job = self._parse_ashby_job(j)
+                    job = self._parse_ashby_job(j, board)
                     if job:
                         all_jobs.append(job)
 
@@ -70,27 +71,29 @@ class AshbyConnector(Connector):
 
         return all_jobs
 
-    def _parse_ashby_job(self, data: dict) -> Optional[Job]:
+    def _parse_ashby_job(self, data: dict, board: str = "") -> Optional[Job]:
         """Parse an Ashby job dict into a Job model."""
         try:
-            apply_url = data.get("applyUrl", "")
+            apply_url = data.get("applyUrl") or data.get("jobUrl", "")
             canonical = self._canonicalise_url(apply_url)
 
             title = data.get("title", "")
-            company = data.get("company", "")
-            location_raw = data.get("location", "")
-            location = location_raw.split(",")[0] if location_raw else ""
+            if not title:
+                return None
 
-            # Ashby experience level
-            experience_level = data.get("experienceLevel", "mid")
-
-            job_type = data.get("employmentType", "full_time")
+            # Ashby API has no company name — use board slug as fallback
+            company = data.get("company") or board.replace("-", " ").title() or "Unknown"
+            location = data.get("location") or ""
+            if isinstance(location, dict):
+                location = location.get("name") or location.get("city") or ""
+            remote = bool(data.get("isRemote", False)) or (data.get("workplaceType") or "").lower() == "remote"
+            job_type = normalize_job_type(data.get("employmentType") or "")
 
             posted_at = None
-            if data.get("postedDate"):
+            raw_date = data.get("publishedAt") or data.get("postedDate")
+            if raw_date:
                 try:
-                    from datetime import datetime, timezone
-                    posted_at = datetime.fromisoformat(data["postedDate"])
+                    posted_at = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     pass
 
@@ -98,13 +101,13 @@ class AshbyConnector(Connector):
                 title=title,
                 company=company,
                 location=location,
-                remote=data.get("isRemote", False),
+                remote=remote,
                 job_type=job_type,
-                experience_level=experience_level,
-                salary=data.get("salary"),
-                description=data.get("description", ""),
+                experience_level="mid",
+                salary=None,
+                description=data.get("descriptionPlain") or data.get("descriptionHtml") or "",
                 posted_at=posted_at,
-                first_seen_at=datetime.utcnow(),
+                first_seen_at=datetime.now(timezone.utc),
                 source=self.name,
                 apply_url=apply_url,
                 canonical_url=canonical,
@@ -112,5 +115,5 @@ class AshbyConnector(Connector):
                 raw=data,
             )
             return job
-        except Exception:
+        except Exception as e:
             return None

@@ -79,21 +79,49 @@ class SearchEngineConnector(Connector):
         type_str = f" {job_type.strip()}" if job_type else ""
 
         if target_site == "linkedin":
-            site_prefix = "site:linkedin.com/jobs/view"
+            site_prefix = "site:linkedin.com/jobs"
             return [
                 f"{site_prefix} {base_term}{loc}{type_str}",
-                f"{site_prefix} \"{base_term}\"{loc}",
-                f"{site_prefix} hiring {base_term}{loc}",
-                f"{site_prefix} {base_term} apply",
+                f'{site_prefix} "{base_term}"{loc}',
+                f"linkedin jobs {base_term}{loc}",
             ]
         elif target_site == "naukri":
             site_prefix = "site:naukri.com/job-listings"
             return [
                 f"{site_prefix} {base_term}{loc}{type_str}",
-                f"{site_prefix} \"{base_term}\"{loc}",
-                f"{site_prefix} opening {base_term}{loc}",
+                f'{site_prefix} "{base_term}"{loc}',
                 f"{site_prefix} {base_term} jobs",
             ]
+        elif target_site == "wellfound":
+            site_prefix = "site:wellfound.com/jobs"
+            defaults = [
+                f'{site_prefix} "AI Engineer"',
+                f'{site_prefix} "GenAI Engineer"',
+                f'{site_prefix} "Python Developer"',
+                f'{site_prefix} "Machine Learning Engineer"',
+            ]
+            if base_term and base_term.lower() not in ["software engineer", ""]:
+                q = f'{site_prefix} "{base_term}"{loc}'
+                return [q] + [d for d in defaults if d.lower() != q.lower()]
+            return defaults
+        elif target_site == "ycombinator":
+            site_prefix = "site:ycombinator.com/jobs"
+            term = base_term or "software engineer"
+            queries = [f'{site_prefix} "{term}"{loc}']
+            if loc:
+                queries.append(f'{site_prefix} "{term}" {location.strip()}')
+            if term.lower() in ["software engineer", ""]:
+                queries.extend([
+                    f'{site_prefix} "AI Engineer"{loc}',
+                    f'{site_prefix} "Python Developer"{loc}',
+                ])
+            # dedupe preserving order
+            seen=set(); out=[]
+            for q in queries:
+                k=q.lower()
+                if k not in seen:
+                    seen.add(k); out.append(q)
+            return out[:5]
         return [f"{base_term}{loc}"]
 
     def _is_target_job_url(self, url: str, target_site: str) -> bool:
@@ -103,9 +131,13 @@ class SearchEngineConnector(Connector):
         path = parsed.path.lower()
 
         if target_site == "linkedin":
-            return "linkedin.com" in netloc and ("/jobs/view/" in path or "/jobs/collections/" in path)
+            return "linkedin.com" in netloc and ("/jobs/view/" in path or "/jobs/" in path)
         elif target_site == "naukri":
             return "naukri.com" in netloc and ("/job-listings" in path or "-jobs-" in path or "/job-" in path)
+        elif target_site == "wellfound":
+            return "wellfound.com" in netloc and "/jobs" in path
+        elif target_site == "ycombinator":
+            return "ycombinator.com" in netloc and path.startswith("/jobs")
         return False
 
     def _canonicalise_url(self, url: str) -> str:
@@ -201,7 +233,7 @@ class SearchEngineConnector(Connector):
         if canonical_url in self._cache:
             return self._cache[canonical_url]
 
-        self._respect_rate_limit()
+        await self._rate_limit()
 
         title = snippet_title
         company = ""
@@ -299,6 +331,8 @@ class SearchEngineConnector(Connector):
             targets.append("linkedin")
         if self.enable_naukri:
             targets.append("naukri")
+        targets.append("wellfound")
+        targets.append("ycombinator")
 
         job_type = filters.job_type if filters else None
 

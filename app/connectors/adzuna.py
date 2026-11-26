@@ -39,7 +39,7 @@ class AdzunaConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[Any] = None,
     ) -> List[Job]:
-        self._rate_limit()
+        await self._rate_limit()
 
         url = "https://api.adzuna.com/v1/api/jobs/in/search/1"
         params = {
@@ -68,8 +68,6 @@ class AdzunaConnector(Connector):
         except httpx.HTTPError as e:
             self._error_count = getattr(self, "_error_count", 0) + 1
             return []
-        finally:
-            self._rate_limit_last = time.time()
 
     def _parse_adzuna_job(self, data: dict) -> Optional[Job]:
         try:

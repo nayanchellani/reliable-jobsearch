@@ -19,7 +19,7 @@ class Job(BaseModel):
         default="full_time", description="Employment type"
     )
     experience_level: Literal[
-        "entry", "junior", "mid", "senior", "lead", "principal", "director"
+        "fresher", "junior", "mid", "senior", "lead", "principal", "director", "entry"
     ] = Field(default="mid", description="Experience level required")
     salary: Optional[str] = Field(default=None, max_length=100, description="Salary range")
     description: Optional[str] = Field(default=None, description="Full job description")
@@ -99,7 +99,7 @@ class JobSearchFilters(BaseModel):
         default=None, description="Employment type filter"
     )
     experience_level: Optional[
-        Literal["entry", "junior", "mid", "senior", "lead", "principal", "director"]
+        Literal["fresher", "junior", "mid", "senior", "lead", "principal", "director", "entry"]
     ] = Field(default=None, description="Experience level filter")
 
     # Sorting

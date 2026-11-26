@@ -30,13 +30,20 @@ interface ResumeProfile {
   education: string[]
 }
 
-const API_BASE = 'http://localhost:8000'
-const api = axios.create({ baseURL: API_BASE })
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const api = axios.create({ baseURL: API_BASE, withCredentials: true })
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
+})
+api.interceptors.response.use((r) => r, (err) => {
+  if (err?.response?.status === 401) {
+    localStorage.removeItem('token')
+    if (window.location.pathname !== '/') window.location.href = '/'
+  }
+  return Promise.reject(err)
 })
 
 // ── Company initials avatar ──────────────────────────────────────────────────
@@ -207,12 +214,22 @@ export default function App() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<{sync_id?: string; status?: string; total_new?: number; results?: any; error?: string} | null>(null)
+  const [error, setError] = useState('')
   const [query, setQuery] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+  const [workMode, setWorkMode] = useState('')
   const [sort, setSort] = useState('posted_at_desc')
+  const [postedWithin, setPostedWithin] = useState('')
+  const [experienceLevel, setExperienceLevel] = useState('')
+  const [jobTypeFilter, setJobTypeFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
   const [activeTab, setActiveTab] = useState<'search' | 'resume' | 'settings'>('search')
   const [savedIds, setSavedIds] = useState<number[]>([])
   const [page, setPage] = useState(1)
   const [perPage] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [pages, setPages] = useState(1)
 
   // Resume
   const [resumeProfile, setResumeProfile] = useState<ResumeProfile | null>(null)
@@ -233,15 +250,29 @@ export default function App() {
   })
 
   // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchJobs = async () => {
+  const fetchJobs = async (targetPage = page) => {
     setLoading(true)
+    setError('')
     try {
-      const params: Record<string, any> = { page, per_page: perPage, sort }
+      const params: Record<string, any> = { page: targetPage, per_page: perPage, sort }
       if (query.trim()) params.q = query.trim()
+      if (locationFilter.trim()) params.location = locationFilter.trim()
+      if (workMode) params.work_mode = workMode
+      if (postedWithin) params.posted_within = postedWithin
+      if (experienceLevel) params.experience_level = experienceLevel
+      if (jobTypeFilter) params.job_type = jobTypeFilter
+      if (sourceFilter) params.source = sourceFilter
       const res = await api.get('/jobs', { params })
-      setJobs(res.data || [])
-    } catch {
+      const data = res.data || {}
+      const items = Array.isArray(data) ? data : (data.jobs || [])
+      setJobs(items)
+      setTotal(Array.isArray(data) ? items.length : (data.total ?? items.length))
+      setPages(Array.isArray(data) ? 1 : (data.pages ?? 1))
+      setPage(Array.isArray(data) ? 1 : (data.page ?? targetPage))
+    } catch (e: any) {
       setJobs([])
+      setTotal(0); setPages(1)
+      setError(e?.response?.data?.detail || e?.message || 'Failed to load jobs')
     } finally {
       setLoading(false)
     }
@@ -254,19 +285,58 @@ export default function App() {
     } catch { /* no profile yet */ }
   }
 
+  const pollSyncStatus = async (syncId: string) => {
+    for (let i = 0; i < 120; i++) {
+      try {
+        const res = await api.get(`/connectors/sync/${syncId}`, { timeout: 15000 })
+        const data = res.data || {}
+        setSyncStatus(data)
+        const st = data.status
+        if (['completed', 'partially_completed', 'failed', 'cancelled'].includes(st)) {
+          await fetchJobs(1)
+          if (st === 'failed' || st === 'cancelled') setError(data.error || `Sync ${st}`)
+          return
+        }
+      } catch (e: any) {
+        // transient poll error; continue briefly
+        if (i > 5) setError(e?.response?.data?.detail || e?.message || 'Sync status check failed')
+      }
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    setError('Sync status polling timed out')
+  }
+
   const triggerSync = async () => {
     setSyncing(true)
+    setError('')
+    setSyncStatus(null)
     try {
-      await api.post('/connectors/sync')
-      await fetchJobs()
+      const res = await api.post('/connectors/sync', null, {
+        params: { query: query.trim() || '', location: locationFilter.trim() || '' },
+        timeout: 30000,
+      })
+      const data = res.data || {}
+      if (data.sync_id) {
+        setSyncStatus({ sync_id: data.sync_id, status: data.status || 'pending' })
+        await pollSyncStatus(data.sync_id)
+      } else {
+        await fetchJobs(1)
+      }
     } catch (e: any) {
-      console.warn('Sync failed:', e.message)
+      const detail = e?.response?.data?.detail
+      if (e?.response?.status === 409 && detail?.sync_id) {
+        setSyncStatus({ sync_id: detail.sync_id, status: 'running' })
+        await pollSyncStatus(detail.sync_id)
+      } else {
+        setError(detail?.message || detail || e?.message || 'Sync failed')
+      }
     } finally {
       setSyncing(false)
     }
   }
 
-  useEffect(() => { if (authenticated) { fetchJobs(); fetchResumeProfile() } }, [sort, page, authenticated])
+  useEffect(() => { if (authenticated) { fetchJobs(1); fetchResumeProfile() } }, [authenticated])
+  useEffect(() => { if (authenticated) fetchJobs(1) }, [sort, postedWithin, experienceLevel, workMode, jobTypeFilter, sourceFilter])
 
   // ── Actions ────────────────────────────────────────────────────────────────
   const logout = () => { localStorage.removeItem('token'); setAuthenticated(false) }
@@ -285,9 +355,9 @@ export default function App() {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await api.post('/resume/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const res = await api.post('/resume/upload', fd)
       setResumeProfile(res.data)
-    } catch { alert('Failed to parse resume') } finally { setUploadingResume(false) }
+    } catch (e:any) { alert(e?.response?.data?.detail || e?.message || 'Failed to parse resume') } finally { setUploadingResume(false) }
   }
 
   const saveProfile = async () => {
@@ -323,8 +393,8 @@ export default function App() {
   }
 
   const saveSettings = async () => {
-    try { await api.put('/settings', settings) }
-    catch { alert('Failed to save settings') }
+    try { await api.put('/settings', settings); alert('Settings saved') }
+    catch (e:any) { alert(e?.response?.data?.detail || 'Failed to save settings') }
   }
 
   // ── Auth gate ──────────────────────────────────────────────────────────────
@@ -363,8 +433,8 @@ export default function App() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && fetchJobs()}
-              placeholder="Search jobs by title or company"
+              onKeyDown={(e) => e.key === 'Enter' && fetchJobs(1)}
+              placeholder="Search jobs across all connectors"
               className="w-full pl-9 pr-4 py-1.5 text-sm border border-neutral-200 rounded-md bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:bg-white transition-colors placeholder:text-neutral-400"
             />
           </div>
@@ -416,7 +486,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-neutral-900 tabular-nums">
-                    {jobs.length} jobs
+                    {total} jobs
                   </span>
                   <button
                     onClick={triggerSync}
@@ -427,35 +497,79 @@ export default function App() {
                     {syncing ? 'Syncing…' : 'Sync now'}
                   </button>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-neutral-500">
+                <div className="flex items-center gap-2 text-xs text-neutral-500 flex-wrap justify-end">
+                  <select value={workMode} onChange={(e)=>setWorkMode(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
+                    <option value="">Any work mode</option>
+                    <option value="remote">Remote</option>
+                    <option value="onsite">Onsite</option>
+                    <option value="hybrid">Hybrid</option>
+                  </select>
+                  <select value={postedWithin} onChange={(e)=>setPostedWithin(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
+                    <option value="">Any time</option>
+                    <option value="24h">24hrs ago</option>
+                    <option value="week">1 week</option>
+                    <option value="month">Month</option>
+                  </select>
+                  <select value={experienceLevel} onChange={(e)=>setExperienceLevel(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
+                    <option value="">Any level</option>
+                    <option value="fresher">Fresher</option>
+                    <option value="junior">Junior</option>
+                    <option value="mid">Mid</option>
+                    <option value="senior">Senior</option>
+                    <option value="lead">Lead</option>
+                  </select>
+                  <select value={jobTypeFilter} onChange={(e)=>setJobTypeFilter(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
+                    <option value="">Any type</option>
+                    <option value="full_time">Full-time</option>
+                    <option value="part_time">Part-time</option>
+                    <option value="contract">Contract</option>
+                    <option value="internship">Internship</option>
+                  </select>
+                  <select value={sourceFilter} onChange={(e)=>setSourceFilter(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
+                    <option value="">Any source</option>
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="naukri">Naukri</option>
+                    <option value="wellfound">Wellfound</option>
+                    <option value="ycombinator">Y Combinator</option>
+                    <option value="remoteok">RemoteOK</option>
+                    <option value="remotive">Remotive</option>
+                    <option value="arbeitnow">Arbeitnow</option>
+                  </select>
                   <span>Sort</span>
-                  <select
-                    value={sort}
-                    onChange={(e) => setSort(e.target.value)}
-                    className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none"
-                  >
+                  <select value={sort} onChange={(e) => setSort(e.target.value)} className="border border-neutral-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none">
                     <option value="posted_at_desc">Newest first</option>
                     <option value="posted_at_asc">Oldest first</option>
-                    <option value="title_asc">Title A–Z</option>
+                    <option value="title_asc">Title A-Z</option>
+                    <option value="title_desc">Title Z-A</option>
                   </select>
                 </div>
               </div>
 
-              {/* Job list */}
+              {error && <div className="p-3 rounded-md border border-red-200 bg-red-50 text-sm text-red-700">{error}</div>}
+              {syncStatus && (
+                <div className="p-3 rounded-md border border-blue-200 bg-blue-50 text-xs text-blue-800 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="font-medium">Sync {syncStatus.status || 'pending'}</span>
+                    {syncStatus.sync_id ? <span className="ml-2 text-blue-600">#{syncStatus.sync_id.slice(0,8)}</span> : null}
+                    {typeof syncStatus.total_new === 'number' ? <span className="ml-2">new: {syncStatus.total_new}</span> : null}
+                  </div>
+                  {syncing && <span className="animate-pulse">Polling?</span>}
+                </div>
+              )}
               {loading ? (
-                <div className="py-16 text-center text-sm text-neutral-400">Loading…</div>
+                <div className="py-16 text-center text-sm text-neutral-400">Loading jobs…</div>
               ) : jobs.length === 0 ? (
                 <div className="py-16 text-center space-y-3">
-                  <p className="text-sm text-neutral-500">No jobs found.</p>
+                  <p className="text-sm text-neutral-500">No jobs found for current filters.</p>
+                  <p className="text-xs text-neutral-400">Adjust filters or sync sources with your query and location.</p>
                   <button
                     onClick={triggerSync}
                     disabled={syncing}
                     className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-md transition-colors disabled:opacity-50"
                   >
                     <RefreshIcon />
-                    {syncing ? 'Syncing…' : 'Fetch jobs now'}
+                    {syncing ? 'Syncing…' : 'Sync sources'}
                   </button>
-                  <p className="text-xs text-neutral-400">Pulls from Remotive, Arbeitnow, RemoteOK and more</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -489,11 +603,9 @@ export default function App() {
                         <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-xs text-neutral-500 bg-neutral-50 capitalize">
                           {formatJobType(job.job_type)}
                         </span>
-                        {job.remote && (
-                          <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-xs text-neutral-500 bg-neutral-50">
-                            Remote
-                          </span>
-                        )}
+                        <span className={`px-2 py-0.5 rounded-md border text-xs ${job.remote ? 'border-emerald-200 text-emerald-700 bg-emerald-50' : /hybrid/i.test(`${job.location} ${job.title} ${job.description || ''}`) ? 'border-amber-200 text-amber-700 bg-amber-50' : 'border-sky-200 text-sky-700 bg-sky-50'}`}>
+                          {job.remote ? 'Remote' : /hybrid/i.test(`${job.location} ${job.title} ${job.description || ''}`) ? 'Hybrid' : 'Onsite'}
+                        </span>
                         <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-xs text-neutral-500 bg-neutral-50 capitalize">
                           {formatExpLevel(job.experience_level)}
                         </span>
@@ -531,29 +643,17 @@ export default function App() {
               {/* Pagination */}
               {jobs.length > 0 && (
                 <div className="flex items-center justify-between pt-4 border-t border-neutral-200 text-xs text-neutral-500">
-                  <span className="tabular-nums">{jobs.length} results</span>
+                  <span className="tabular-nums">{total} results ? page {page}/{pages}</span>
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setPage(Math.max(1, page - 1))}
-                      disabled={page === 1}
-                      className="px-2.5 py-1 border border-neutral-200 rounded-md hover:bg-neutral-50 disabled:opacity-40 transition-colors"
-                    >
-                      ‹
-                    </button>
+                    <button onClick={() => fetchJobs(Math.max(1, page - 1))} disabled={page === 1 || loading} className="px-2.5 py-1 border border-neutral-200 rounded-md hover:bg-neutral-50 disabled:opacity-40 transition-colors">Prev</button>
                     <span className="px-3 py-1 bg-orange-600 text-white rounded-md tabular-nums">{page}</span>
-                    <button
-                      onClick={() => setPage(page + 1)}
-                      className="px-2.5 py-1 border border-neutral-200 rounded-md hover:bg-neutral-50 transition-colors"
-                    >
-                      ›
-                    </button>
+                    <button onClick={() => fetchJobs(Math.min(pages, page + 1))} disabled={page >= pages || loading} className="px-2.5 py-1 border border-neutral-200 rounded-md hover:bg-neutral-50 disabled:opacity-40 transition-colors">Next</button>
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* ── RESUME TAB ── */}
           {activeTab === 'resume' && (
             <div className="max-w-2xl space-y-6">
               <div className="flex items-start justify-between">
@@ -640,7 +740,7 @@ export default function App() {
             <div className="max-w-lg space-y-6">
               <div>
                 <h1 className="text-base font-semibold text-neutral-900">Settings</h1>
-                <p className="text-xs text-neutral-500 mt-1">Configure your LLM endpoint and ATS tokens</p>
+                <p className="text-xs text-neutral-500 mt-1">Optional overrides. API keys/credentials should stay in backend .env; use this only when you need UI overrides.</p>
               </div>
 
               <div className="bg-white border border-neutral-200 rounded-xl p-5 space-y-4">

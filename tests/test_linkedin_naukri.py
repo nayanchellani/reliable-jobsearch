@@ -12,7 +12,7 @@ def test_search_engine_query_generation():
 
     li_queries = connector._generate_queries("linkedin", "frontend engineer", "Bangalore")
     assert len(li_queries) >= 3
-    assert any("site:linkedin.com/jobs/view" in q for q in li_queries)
+    assert any("site:linkedin.com/jobs" in q for q in li_queries)
     assert any("frontend engineer" in q for q in li_queries)
 
     naukri_queries = connector._generate_queries("naukri", "data scientist", "Delhi")

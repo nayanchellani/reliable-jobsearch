@@ -37,7 +37,7 @@ class RemoteOKConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[Any] = None,
     ) -> List[Job]:
-        self._rate_limit()   # sync – not async
+        await self._rate_limit()
 
         url = "https://remoteok.com/api"
         params = {}
@@ -55,12 +55,11 @@ class RemoteOKConnector(Connector):
 
             self._success_count = getattr(self, "_success_count", 0) + 1
             return jobs
-
-        except httpx.HTTPError as e:
+        except Exception as e:
             self._error_count = getattr(self, "_error_count", 0) + 1
+            self._last_error = str(e)
+            print(f"RemoteOK fetch error: {e}")
             return []
-        finally:
-            self._rate_limit_last = time.time()
 
     def _parse_remoteok_job(self, data: dict) -> Optional[Job]:
         try:
@@ -90,9 +89,4 @@ class RemoteOKConnector(Connector):
         except Exception:
             return None
 
-    def _rate_limit(self) -> None:
-        now = time.time()
-        elapsed = now - self._rate_limit_last
-        if elapsed < self.rate_limit_ms / 1000.0:
-            time.sleep(self.rate_limit_ms / 1000.0 - elapsed)
-        self._rate_limit_last = time.time()
+    # uses Connector._rate_limit()

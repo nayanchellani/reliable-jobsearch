@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
-from app.connectors.base import Connector, ConnectorError
+from app.connectors.base import Connector, ConnectorError, normalize_job_type
 from app.schemas.job import Job
 
 LEVER_API_BASE = "https://api.lever.co/v0"
@@ -51,16 +51,13 @@ class LeverConnector(Connector):
             url = f"{LEVER_API_BASE}/postings/{company}"
             params = {"mode": "json"}
 
-            if location:
-                params["location"] = location
-
             try:
                 resp = await self.client.get(url, params=params)
                 resp.raise_for_status()
                 data = resp.json()
 
                 for j in data if isinstance(data, list) else [data]:
-                    job = self._parse_lever_job(j)
+                    job = self._parse_lever_job(j, company)
                     if job:
                         all_jobs.append(job)
 
@@ -77,33 +74,23 @@ class LeverConnector(Connector):
 
         return all_jobs
 
-    def _parse_lever_job(self, data: dict) -> Optional[Job]:
+    def _parse_lever_job(self, data: dict, company_slug: str = "") -> Optional[Job]:
         """Parse a Lever job dict into a Job model."""
         try:
-            apply_url = data.get("applyUrl", "")
+            apply_url = data.get("applyUrl") or data.get("hostedUrl", "")
             canonical = self._canonicalise_url(apply_url)
 
-            # Lever uses different field names
-            title = data.get("title", "")
-            company = data.get("company", "")
-            # Location may be formatted
-            location_raw = data.get("location", "")
-            # Parse city from formatted location
-            location = location_raw.split(",")[0] if location_raw else ""
-
-            # Experience level
-            experience_level = data.get("tags", [{}])[0].get("display", "mid") if data.get("tags") else "mid"
-
-            # Job type from lever
-            job_type = data.get("categories", {}).get("type", "full_time")
+            title = data.get("text") or data.get("title", "")
+            company = data.get("company") or company_slug.capitalize()
+            cats = data.get("categories") or {}
+            location = cats.get("location") or data.get("location", "")
+            remote = data.get("workplaceType") == "remote" or "remote" in location.lower()
+            job_type = normalize_job_type(cats.get("commitment") or cats.get("type") or "")
 
             posted_at = None
-            if data.get("publishedAt"):
+            if data.get("createdAt"):
                 try:
-                    from datetime import datetime, timezone
-                    posted_at = datetime.fromisoformat(
-                        data["publishedAt"].replace("Z", "+00:00")
-                    ).replace(tzinfo=timezone.utc)
+                    posted_at = datetime.fromtimestamp(data["createdAt"] / 1000.0, tz=timezone.utc)
                 except (ValueError, TypeError):
                     pass
 
@@ -111,11 +98,11 @@ class LeverConnector(Connector):
                 title=title,
                 company=company,
                 location=location,
-                remote=False,  # Lever doesn't always expose remote flag clearly
+                remote=remote,
                 job_type=job_type,
-                experience_level=experience_level,
-                salary=data.get("salary"),  # May be None
-                description=data.get("description", ""),
+                experience_level="mid",
+                salary=data.get("salary"),
+                description=data.get("descriptionPlain") or data.get("description", ""),
                 posted_at=posted_at,
                 first_seen_at=datetime.now(timezone.utc),
                 source=self.name,

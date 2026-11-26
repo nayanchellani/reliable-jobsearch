@@ -23,7 +23,9 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 # Load .env from project root
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# Load .env from repo root and current working dir
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/jobs.db")
 if DATABASE_URL.startswith("sqlite:///./"):
@@ -108,3 +110,23 @@ class UserSettings(Base):
     setting_key = Column(String(100), unique=True, nullable=False, index=True)
     setting_value = Column(Text, nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ConnectorSyncRun(Base):
+    """Persisted connector sync run for async status/polling."""
+
+    __tablename__ = "connector_sync_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sync_id = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)  # pending|running|completed|partially_completed|failed|cancelled
+    query = Column(String(500), nullable=True)
+    location = Column(String(200), nullable=True)
+    requested_by = Column(String(255), nullable=True)
+    total_new = Column(Integer, default=0, nullable=False)
+    results_json = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

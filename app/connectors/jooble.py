@@ -38,7 +38,7 @@ class JoobleConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[Any] = None,
     ) -> List[Job]:
-        self._rate_limit()
+        await self._rate_limit()
 
         url = f"https://jooble.org/api/{self.api_key}"
         payload = {"keywords": query}
@@ -62,8 +62,6 @@ class JoobleConnector(Connector):
         except httpx.HTTPError as e:
             self._error_count = getattr(self, "_error_count", 0) + 1
             return []
-        finally:
-            self._rate_limit_last = time.time()
 
     def _parse_jooble_job(self, data: dict) -> Optional[Job]:
         try:

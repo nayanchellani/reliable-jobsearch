@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
-from app.connectors.base import Connector, ConnectorError
+from app.connectors.base import Connector, ConnectorError, normalize_job_type
 from app.schemas.job import Job
 
 GREENHOUSE_API_BASE = "https://boards-api.greenhouse.io/v1"
@@ -76,38 +77,36 @@ class GreenhouseConnector(Connector):
 
         return all_jobs
 
-    def _parse_greenhouse_job(self, data: dict) -> Optional[Job]:
+    def _parse_greenhouse_job(self, data: dict, token: str = "") -> Optional[Job]:
         """Parse a Greenhouse job dict into a Job model."""
         try:
-            # Extract canonical URL and apply URL
-            apply_url = data.get("absolute_application_url", "")
+            apply_url = data.get("absolute_url") or data.get("absolute_application_url", "")
             canonical = self._canonicalise_url(apply_url)
 
-            # Parse posted_at from ISO string
             posted_at = None
-            if data.get("posted_at"):
+            raw_date = data.get("first_published") or data.get("updated_at") or data.get("posted_at")
+            if raw_date:
                 try:
-                    from datetime import datetime, timezone
-                    posted_at = datetime.fromisoformat(
-                        data["posted_at"].replace("Z", "+00:00")
-                    )
+                    posted_at = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     pass
 
-            # Parse experience level from title or levels dict
-            experience_level = data.get("experience_levels", ["mid"])[0] if data.get("experience_levels") else "mid"
+            loc_obj = data.get("location") or {}
+            location = loc_obj.get("name", "") if isinstance(loc_obj, dict) else str(loc_obj)
+            company = data.get("company_name") or data.get("name") or token.capitalize()
+            remote = "remote" in location.lower() or bool(data.get("remote", False))
 
             job = Job(
                 title=data.get("title", ""),
-                company=data.get("name", ""),
-                location=data.get("location", {}).get("city", ""),
-                remote=bool(data.get("remote", False)),
-                job_type=data.get("employment_type", "full_time"),
-                experience_level=experience_level,
-                salary=data.get("salary"),  # May be None
+                company=company,
+                location=location,
+                remote=remote,
+                job_type=normalize_job_type(data.get("employment_type") or ""),
+                experience_level="mid",
+                salary=data.get("salary"),
                 description=data.get("content", ""),
                 posted_at=posted_at,
-                first_seen_at=datetime.utcnow(),
+                first_seen_at=datetime.now(timezone.utc),
                 source=self.name,
                 apply_url=apply_url,
                 canonical_url=canonical,

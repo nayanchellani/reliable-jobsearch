@@ -14,6 +14,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+import asyncio
 from bs4 import BeautifulSoup
 import httpx
 
@@ -150,7 +151,8 @@ class AlertEmailConnector(Connector):
         location: Optional[str] = None,
         filters: Optional[JobSearchFilters] = None,
     ) -> List[Job]:
-        """Fetch alert email jobs (delegates to configured IMAP/Gmail)."""
+        """Fetch alert email jobs. IMAP/Gmail integration is optional and stubbed when not configured."""
         await self._rate_limit()
+        # Stub: return empty; real IMAP/Gmail pull can be configured via env/settings.
         self._success_count += 1
         return []
